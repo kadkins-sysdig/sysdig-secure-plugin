@@ -129,7 +129,7 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
       inlineScanContainer.execAsync(Arrays.asList(TAIL_COMMAND), null, frame -> this.sendToLog(logger, frame), frame -> this.sendToLog(logger, frame));
 
       logger.logDebug("Executing command in container: " + args);
-      inlineScanContainer.exec(args, null, frame -> this.sendToBuilder(builder, frame), frame -> this.sendToDebugLog(logger, frame));
+      inlineScanContainer.exec(args, null, frame -> this.sendToBuilder(builder, frame), frame -> this.sendToDebugLog(logger, "2>" + frame));
     } finally {
       inlineScanContainer.stop(STOP_SECONDS);
     }
@@ -198,6 +198,8 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
       // Workaround for older versions of inline-scan which can include some verbose output from "set -x", starting with "+ " in the stdout
       if (!line.startsWith("+ ")) {
         builder.append(line);
+      } else {
+        this.sendToDebugLog(logger, "1>" + frame);
       }
     }
   }
