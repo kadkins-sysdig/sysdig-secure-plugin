@@ -208,6 +208,19 @@
   <build>
     <plugins>
 
+
+            <plugin>
+              <groupId>org.owasp</groupId>
+              <artifactId>dependency-check-maven</artifactId>
+              <version>6.2.2</version>
+              <executions>
+                  <execution>
+                      <goals>
+                          <goal>check</goal>
+                      </goals>
+                  </execution>
+              </executions>
+            </plugin>
       <!-- download external resources like jQuery, jQuery UI, datatable etc. via webjars -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

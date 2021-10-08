@@ -42,10 +42,10 @@ public class DockerClientContainer implements Container {
       .exec(new ResultCallback.Adapter<Frame>() {
         @Override
         public void onNext(Frame item) {
-          if (item.getStreamType() == StreamType.STDOUT && stdoutCallback != null){
+          if (item.getStreamType() == StreamType.STDOUT && stdoutCallback != null) {
             stdoutCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
           }
-          if (item.getStreamType() == StreamType.STDERR && stderrCallback != null){
+          if (item.getStreamType() == StreamType.STDERR && stderrCallback != null) {
             stderrCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
           }
           super.onNext(item);
@@ -54,16 +54,19 @@ public class DockerClientContainer implements Container {
   }
 
   @Override
-  public void exec(List<String> cmd, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback) throws InterruptedException {
-     execAsyncWithAdapter(cmd, envVars, stdoutCallback, stderrCallback).awaitCompletion();
+  public long exec(List<String> cmd, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback) throws InterruptedException {
+    long exitCode[] = {-1};
+    execAsyncWithAdapter(cmd, envVars, stdoutCallback, stderrCallback, code -> { exitCode[0] = code; }).awaitCompletion();
+    return exitCode[0];
   }
 
   @Override
-  public void execAsync(List<String> cmd, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback) {
-    execAsyncWithAdapter(cmd, envVars, stdoutCallback, stderrCallback);
+  public void execAsync(List<String> cmd, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback, Consumer<Long> completedCallback) {
+    execAsyncWithAdapter(cmd, envVars, stdoutCallback, stderrCallback, completedCallback);
+
   }
 
-  private ResultCallback.Adapter<Frame> execAsyncWithAdapter(List<String> cmd, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback) {
+  private ResultCallback.Adapter<Frame> execAsyncWithAdapter(List<String> cmd, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback, Consumer<Long> completedCallback) {
     ExecCreateCmd execCmd = dockerClient.execCreateCmd(this.containerId)
       .withAttachStderr(true)
       .withAttachStdin(true)
@@ -77,17 +80,26 @@ public class DockerClientContainer implements Container {
       execCmd = execCmd.withEnv(envVars);
     }
 
-    return dockerClient.execStartCmd(execCmd.exec().getId())
+    String execId = execCmd.exec().getId();
+    return dockerClient.execStartCmd(execId)
       .exec(new ResultCallback.Adapter<Frame>() {
         @Override
         public void onNext(Frame item) {
-          if (item.getStreamType() == StreamType.STDOUT && stdoutCallback != null){
+          if (item.getStreamType() == StreamType.STDOUT && stdoutCallback != null) {
             stdoutCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
           }
-          if (item.getStreamType() == StreamType.STDERR && stderrCallback != null){
+          if (item.getStreamType() == StreamType.STDERR && stderrCallback != null) {
             stderrCallback.accept(new String(item.getPayload(), StandardCharsets.UTF_8));
           }
           super.onNext(item);
+        }
+
+        @Override
+        public void onComplete() {
+          if (completedCallback != null) {
+            completedCallback.accept(dockerClient.inspectExecCmd(execId).exec().getExitCodeLong());
+          }
+          super.onComplete();
         }
       });
   }
@@ -107,7 +119,7 @@ public class DockerClientContainer implements Container {
       .exec();
 
     dockerClient.removeContainerCmd(this.containerId)
-    .withForce(true)
-    .exec();
+      .withForce(true)
+      .exec();
   }
 }

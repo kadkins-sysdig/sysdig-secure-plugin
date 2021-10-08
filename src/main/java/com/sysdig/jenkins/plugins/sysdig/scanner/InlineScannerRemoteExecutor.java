@@ -35,7 +35,7 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
   private static final String DUMMY_ENTRYPOINT = "cat";
   private static final String[] MKDIR_COMMAND = new String[]{"mkdir", "-p", "/tmp/sysdig-inline-scan/logs"};
   private static final String[] TOUCH_COMMAND = new String[]{"touch", "/tmp/sysdig-inline-scan/logs/info.log"};
-  private static final String[] TAIL_COMMAND = new String[]{"tail", "-f", "/tmp/sysdig-inline-scan/logs/info.log"};
+  private static final String[] TAIL_COMMAND = new String[]{"tail", "--sleep-interval=0.2", "-f", "/tmp/sysdig-inline-scan/logs/info.log"};
   private static final String SCAN_COMMAND = "/sysdig-inline-scan.sh";
   private static final String[] SCAN_ARGS = new String[] {
     "--storage-type=docker-daemon",
@@ -48,6 +48,7 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
   private static final String DOCKERFILE_MOUNTPOINT = "/tmp/";
 
   private static final int STOP_SECONDS = 1;
+  private static final int MAX_WAIT_MS = 60000;
 
   // Use a default container runner factory, but allow overriding for mocks in tests
   private static ContainerRunnerFactory containerRunnerFactory = new DockerClientContainerFactory();
@@ -61,6 +62,9 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
   private final BuildConfig config;
   private final SysdigLogger logger;
   private final EnvVars envVars;
+  private final StringBuilder jsonOutput = new StringBuilder();
+  private final StringBuilder errorOutput = new StringBuilder();
+
 
   public InlineScannerRemoteExecutor(String imageName, String dockerFile, BuildConfig config, SysdigLogger logger, EnvVars envVars) {
     this.imageName = imageName;
@@ -118,25 +122,46 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
       args.addAll(Arrays.asList(config.getInlineScanExtraParams().split(" ")));
     }
 
-    final StringBuilder builder = new StringBuilder();
+    long exitCode = -1;
+    Object tailFinished = new Object();
 
     try {
       //TODO: Get exit code in run and exec?
-      inlineScanContainer.runAsync(frame -> this.sendToLog(logger, frame), frame -> this.sendToLog(logger, frame));
+      inlineScanContainer.runAsync(frame -> this.sendToLog(frame), frame -> this.sendToLog(frame));
 
-      inlineScanContainer.exec(Arrays.asList(MKDIR_COMMAND), null, frame -> this.sendToLog(logger, frame), frame -> this.sendToLog(logger, frame));
-      inlineScanContainer.exec(Arrays.asList(TOUCH_COMMAND), null,  frame -> this.sendToLog(logger, frame), frame -> this.sendToLog(logger, frame));
-      inlineScanContainer.execAsync(Arrays.asList(TAIL_COMMAND), null, frame -> this.sendToLog(logger, frame), frame -> this.sendToLog(logger, frame));
+      inlineScanContainer.exec(Arrays.asList(MKDIR_COMMAND), null, frame -> this.sendToLog(frame), frame -> this.sendToLog(frame));
+      inlineScanContainer.exec(Arrays.asList(TOUCH_COMMAND), null,  frame -> this.sendToLog(frame), frame -> this.sendToLog(frame));
+      inlineScanContainer.execAsync(Arrays.asList(TAIL_COMMAND), null, frame -> this.sendToLog(frame), frame -> this.sendToLog( frame), code -> { synchronized (tailFinished) { logger.logDebug("Container tail completed");  tailFinished.notify(); } });
 
       logger.logDebug("Executing command in container: " + args);
-      inlineScanContainer.exec(args, null, frame -> this.sendToBuilder(builder, frame), frame -> this.sendToDebugLog(logger, "2>" + frame));
+      exitCode = inlineScanContainer.exec(args, null, frame -> this.sendToJSONOutput(frame), frame -> this.sendToErrorOutput(frame));
     } finally {
+      logger.logDebug("Stopping container");
       inlineScanContainer.stop(STOP_SECONDS);
+      logger.logDebug("Container stopped");
+      synchronized (tailFinished) {
+        tailFinished.wait(MAX_WAIT_MS);
+      }
+
+      logger.logDebug("Tail finished");
+
+      if (config.getDebug()) {
+        logger.logDebug("Inline-scanner verbose execution stdout output:\n" + jsonOutput);
+        logger.logDebug("Inline-scanner verbose execution stderr output:\n" + errorOutput);
+      }
     }
 
-    //TODO: For exit code 2 (wrong params), just show the output (should not happen, but just in case)
+    // For exit code 2 (wrong params) or other unexpected exit codes, just show the output
+    if (exitCode != 0 && exitCode != 1 && exitCode != 3) {
+      logger.logError(String.format("Error executing the inline scanner. Exit code %d", exitCode));
+      if (!config.getDebug()) {
+        logger.logError("Standard Output:\n" + jsonOutput);
+        logger.logError("ErrorOutput:\n" + errorOutput);
+      }
+      throw new InterruptedException(String.format("Error executing the inline scanner. Exit code %d", exitCode));
+    }
 
-    return builder.toString();
+    return jsonOutput.toString();
   }
 
   private void addProxyVars(EnvVars currentEnv, List<String> envVars, SysdigLogger logger) {
@@ -193,26 +218,27 @@ public class InlineScannerRemoteExecutor implements Callable<String, Exception>,
     }
   }
 
-  private void sendToBuilder(StringBuilder builder, String frame) {
+  private void sendToJSONOutput(String frame) {
     for (String line: frame.split("[\n\r]")) {
       // Workaround for older versions of inline-scan which can include some verbose output from "set -x", starting with "+ " in the stdout
       if (!line.startsWith("+ ")) {
-        builder.append(line);
+        jsonOutput.append(line);
       } else {
-        this.sendToDebugLog(logger, "1>" + frame);
+        logger.logError("Filtered out spurious JSON output line: " + line);
+        errorOutput.append(line + "\n");
       }
     }
   }
 
-  private void sendToLog(SysdigLogger logger, String frame) {
+  private void sendToLog(String frame) {
     for (String line: frame.split("[\n\r]")) {
       logger.logInfo(line);
     }
   }
 
-  private void sendToDebugLog(SysdigLogger logger, String frame) {
+  private void sendToErrorOutput(String frame) {
     for (String line: frame.split("[\n\r]")) {
-      logger.logDebug(line);
+      errorOutput.append(line + "\n");
     }
   }
 }

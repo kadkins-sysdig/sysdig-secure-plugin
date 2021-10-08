@@ -23,7 +23,6 @@ public class DockerClientRunner implements ContainerRunner {
 
   public DockerClientRunner(SysdigLogger logger, EnvVars currentEnv) {
 
-
     DefaultDockerClientConfig.Builder configBuilder = DefaultDockerClientConfig.createDefaultConfigBuilder();
     if (currentEnv.get("DOCKER_HOST") != null) {
       configBuilder.withDockerHost(currentEnv.get("DOCKER_HOST"));

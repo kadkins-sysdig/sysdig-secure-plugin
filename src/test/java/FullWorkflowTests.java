@@ -64,8 +64,20 @@ public class FullWorkflowTests {
     output.put("scanReport", gates);
     output.put("vulnsReport", vulns);
 
+    // Mock async executions of "tail", to simulate some log output
+    doNothing().when(container).execAsync(
+      argThat(args -> args.get(0).equals("tail")),
+      any(),
+      any(),
+      any(),
+      argThat(matcher -> {
+        matcher.accept((long)0);
+        return true;
+      })
+    );
+
     // Mock sync execution of the inline scan script. Mock the JSON output
-    doNothing().when(container).exec(
+    doReturn((long)0).when(container).exec(
       argThat(args -> args.get(0).equals("/sysdig-inline-scan.sh")),
       any(),
       argThat(matcher -> {

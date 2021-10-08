@@ -6,16 +6,18 @@ import com.sysdig.jenkins.plugins.sysdig.containerrunner.Container;
 import com.sysdig.jenkins.plugins.sysdig.containerrunner.ContainerRunner;
 import com.sysdig.jenkins.plugins.sysdig.containerrunner.ContainerRunnerFactory;
 import com.sysdig.jenkins.plugins.sysdig.log.SysdigLogger;
+import hudson.AbortException;
 import hudson.EnvVars;
 import net.sf.json.JSONObject;
 import org.junit.*;
+import org.junit.rules.ExpectedException;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 import org.mockito.quality.Strictness;
 
 import java.util.regex.Pattern;
 
-import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
@@ -82,11 +84,15 @@ public class InlineScannerRemoteExecutorTests {
         matcher.accept(logOutput);
         return true;
       }),
-      any()
+      any(),
+      argThat(matcher -> {
+        matcher.accept((long)0);
+        return true;
+      })
     );
 
     // Mock sync execution of the inline scan script. Mock the JSON output
-    doNothing().when(container).exec(
+    doReturn((long)0).when(container).exec(
       argThat(args -> args.get(0).equals("/sysdig-inline-scan.sh")),
       any(),
       argThat(matcher -> {
@@ -97,7 +103,7 @@ public class InlineScannerRemoteExecutorTests {
     );
 
     // Mock execution of the touch or mkdir commands
-    doNothing().when(container).exec(
+    doReturn((long)0).when(container).exec(
       argThat(args -> args.get(0).equals("touch") || args.get(0).equals("mkdir")),
       any(),
       any(),
@@ -125,6 +131,28 @@ public class InlineScannerRemoteExecutorTests {
       isNull(),
       any(),
       any());
+  }
+
+  @Test
+  public void containerExitCode2RaisesException() throws Exception {
+    // Mock sync execution of the inline scan script. Mock the JSON output
+    doReturn((long)2).when(container).exec(
+      argThat(args -> args.get(0).equals("/sysdig-inline-scan.sh")),
+      any(),
+      argThat(matcher -> {
+        matcher.accept("some error");
+        return true;
+      }),
+      any()
+    );
+
+    // When
+    InterruptedException thrown = assertThrows(
+      InterruptedException.class,
+      () -> scannerRemoteExecutor.call());
+
+    // Then
+    assertTrue(thrown.getMessage().contains("Error executing the inline scanner. Exit code 2"));
   }
 
   @Test
@@ -306,7 +334,6 @@ public class InlineScannerRemoteExecutorTests {
       any(),
       any());
   }
-
 
   @Test
   public void setSysdigTokenIsProvidedAsEnvironmentVariable() throws Exception {

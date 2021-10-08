@@ -6,8 +6,8 @@ import java.util.function.Consumer;
 public interface Container {
   void run(Consumer<String> stdoutCallback, Consumer<String> stderrCallback) throws InterruptedException;
   void runAsync(Consumer<String> stdoutCallback, Consumer<String> stderrCallback);
-  void exec(List<String> args, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback) throws InterruptedException;
-  void execAsync(List<String> args, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback);
+  long exec(List<String> args, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback) throws InterruptedException;
+  void execAsync(List<String> args, List<String> envVars, Consumer<String> stdoutCallback, Consumer<String> stderrCallback, Consumer<Long> completedCallback);
   void stop(int timeout);
   void copy(String source, String destinationFolder);
 }
